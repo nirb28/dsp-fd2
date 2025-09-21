@@ -5,7 +5,7 @@ All modules must implement this interface for the Front Door to load and execute
 
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, AsyncGenerator
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from enum import Enum
 import httpx
 
@@ -59,6 +59,8 @@ class ModuleRequest(BaseModel):
 
 class ModuleResponse(BaseModel):
     """Standard response from module"""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
     status_code: int
     headers: Dict[str, str] = Field(default_factory=dict)
     body: Optional[Any] = None

@@ -7,17 +7,54 @@ import asyncio
 import hashlib
 import importlib
 import json
+import os
+import sys
 import time
+from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
+
+# Add project root to Python path
+project_root = Path(__file__).parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 import httpx
 from fastapi import FastAPI, Request, Response, HTTPException, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-import redis.asyncio as redis
-from prometheus_client import Counter, Histogram, generate_latest
+
+# Optional imports with fallbacks
+try:
+    import redis.asyncio as redis
+except ImportError:
+    redis = None
+    print("Warning: Redis not available - caching disabled")
+
+try:
+    from prometheus_client import Counter, Histogram, generate_latest
+except ImportError:
+    print("Warning: Prometheus client not available - metrics disabled")
+    # Mock prometheus classes for development
+    class Counter:
+        def __init__(self, *args, **kwargs):
+            pass
+        def inc(self, *args, **kwargs):
+            pass
+        def labels(self, *args, **kwargs):
+            return self
+    
+    class Histogram:
+        def __init__(self, *args, **kwargs):
+            pass
+        def observe(self, *args, **kwargs):
+            pass
+        def labels(self, *args, **kwargs):
+            return self
+    
+    def generate_latest():
+        return "# Prometheus metrics disabled\n"
 
 from src.core.module_interface import BaseModule, ModuleConfig, ModuleRequest, ModuleType
 
@@ -155,13 +192,20 @@ class FrontDoorService:
     def __init__(self, config: FrontDoorConfig):
         self.config = config
         self.module_manager = ModuleManager(config)
-        self.redis_client: Optional[redis.Redis] = None
+        self.redis_client = None
         self.http_client: Optional[httpx.AsyncClient] = None
     
     async def initialize(self):
         """Initialize service connections"""
-        # Redis for caching
-        self.redis_client = redis.from_url(self.config.redis_url)
+        # Redis for caching (optional)
+        if redis is not None:
+            try:
+                self.redis_client = redis.from_url(self.config.redis_url)
+            except Exception as e:
+                print(f"Warning: Failed to connect to Redis: {e}")
+                self.redis_client = None
+        else:
+            self.redis_client = None
         
         # HTTP client for external services
         self.http_client = httpx.AsyncClient(
@@ -443,10 +487,10 @@ app = FastAPI(
 
 # Initialize Front Door service
 config = FrontDoorConfig(
-    control_tower_url="http://localhost:8081",  # dsp-ai-control-tower
-    vault_url="http://localhost:8200",  # HashiCorp Vault
-    jwt_service_url="http://localhost:8082",  # dsp_ai_jwt
-    redis_url="redis://localhost:6379"
+    control_tower_url=os.getenv("CONTROL_TOWER_URL", "http://localhost:8081"),
+    vault_url=os.getenv("VAULT_URL", "http://localhost:8200"),
+    jwt_service_url=os.getenv("JWT_SERVICE_URL", "http://localhost:8082"),
+    redis_url=os.getenv("REDIS_URL", "redis://localhost:6379")
 )
 
 app.state.front_door = FrontDoorService(config)
@@ -469,3 +513,8 @@ async def metrics():
 async def route_request(request: Request):
     """Route all requests to appropriate modules"""
     return await app.state.front_door.handle_request(request)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("src.front_door:app", host="0.0.0.0", port=8080, reload=True)

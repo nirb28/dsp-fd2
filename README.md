@@ -4,14 +4,7 @@ DSP-FD2 is an enterprise-grade, modular API gateway that serves as the intellige
 
 ### Key Features
 
-- 🔄 **Dynamic Module Loading**: Load and execute modules on-demand based on Control Tower manifests
-- 🔐 **Security First**: JWT authentication, API key management, and secret injection from Vault
-- 📊 **Observability**: Prometheus metrics, OpenTelemetry tracing, structured logging
-- 🚀 **High Performance**: Async Python with connection pooling and intelligent caching
-- 🛡️ **Resilience**: Circuit breakers, retry strategies, and graceful degradation
-- 🎛️ **OpenAI Compatible**: First-class support for OpenAI API compatibility
-
-## 🏗️ Architecture
+## Architecture
 
 ```
 Client Request → Front Door (dsp-fd2) → Control Tower → Module Discovery → Module Execution → Backend Service
@@ -27,32 +20,19 @@ Client Request → Front Door (dsp-fd2) → Control Tower → Module Discovery �
 4. **Security Layer**: JWT validation and secret management
 5. **Module Interface**: Standardized contract for all modules
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
 - Python 3.11+
-- Docker & Docker Compose
 - Redis (for caching)
 - PostgreSQL (optional, for audit logs)
 
 ### Installation
 
-1. **Clone the repository**:
-```bash
-git clone https://github.com/yourorg/dsp-fd2.git
-cd dsp-fd2
-```
-
-2. **Setup environment**:
-```bash
-cp .env.example .env
-# Edit .env with your configuration
-```
-
 3. **Install dependencies**:
 ```bash
-python -m venv venv
+python -m venv .fd_venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
@@ -185,7 +165,7 @@ class MyCustomModule(BaseModule):
 }
 ```
 
-## 📊 Monitoring
+## Monitoring
 
 ### Metrics
 
@@ -223,7 +203,7 @@ Structured JSON logs with correlation IDs:
 }
 ```
 
-## 🔐 Security
+## Security
 
 ### Authentication
 
@@ -249,7 +229,7 @@ RATE_LIMIT_REQUESTS_PER_MINUTE=60
 RATE_LIMIT_BURST_SIZE=10
 ```
 
-## 🧪 Testing
+## Testing
 
 ### Unit Tests
 ```bash
@@ -272,7 +252,7 @@ k6 run tests/load/scenario.js
 ./scripts/e2e_test.sh
 ```
 
-## 🚢 Deployment
+## Deployment
 
 ### Docker
 
@@ -281,29 +261,7 @@ docker build -t dsp-fd2:latest .
 docker run -p 8080:8080 --env-file .env dsp-fd2:latest
 ```
 
-### Kubernetes
-
-```bash
-kubectl apply -f kubernetes/
-```
-
-### Helm
-
-```bash
-helm install dsp-fd2 ./helm/dsp-fd2 \
-  --set image.tag=latest \
-  --set ingress.enabled=true
-```
-
-## 📚 Documentation
-
-- [API Documentation](./docs/API.md)
-- [Security Design](./SECURITY_DESIGN.md)
-- [Scalability & Resilience](./SCALABILITY_RESILIENCE.md)
-- [Implementation Roadmap](./IMPLEMENTATION_ROADMAP.md)
-- [Module Development Guide](./docs/MODULE_DEVELOPMENT.md)
-
-## 🎯 Roadmap
+## Roadmap
 
 - [x] Phase 1: Basic routing and module interface
 - [x] Phase 2: Control Tower integration
