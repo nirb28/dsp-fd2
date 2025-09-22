@@ -23,6 +23,8 @@ if str(project_root) not in sys.path:
 import httpx
 from fastapi import FastAPI, Request, Response, HTTPException, Header
 from fastapi.responses import StreamingResponse
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 # Optional imports with fallbacks
@@ -402,6 +404,10 @@ class FrontDoorService:
         """Main request handler"""
         start_time = time.time()
         
+        # Initialize variables for metrics
+        project = "unknown"
+        module = "unknown"
+        
         try:
             # Parse request target
             project, module, environment = self.parse_request_target(request)
@@ -479,11 +485,21 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="DSP-FD2 Front Door",
+    title="DSPAI-FD2 Front Door",
     description="Dynamic module routing gateway",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url=None, redoc_url=None
 )
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/docs", include_in_schema=False)
+async def swagger_ui_html():
+    return get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title="DSPAI - Front Door",
+        swagger_favicon_url="/static/fd.ico"
+    )
 
 # Initialize Front Door service
 config = FrontDoorConfig(
