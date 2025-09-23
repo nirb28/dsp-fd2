@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import importlib
 import json
+import logging
 import os
 import sys
 import time
@@ -19,6 +20,24 @@ from contextlib import asynccontextmanager
 project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
+
+# Configure logging
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+
+# Create logs directory if it doesn't exist
+logs_dir = Path("logs")
+logs_dir.mkdir(exist_ok=True)
+
+logging.basicConfig(
+    level=getattr(logging, log_level, logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler("logs/front_door.log", mode="a")
+    ]
+)
+logger = logging.getLogger("DSP-FD2")
+logger.info(f"Starting DSP-FD2 Front Door with log level: {log_level}")
 
 import httpx
 from fastapi import FastAPI, Request, Response, HTTPException, Header
@@ -73,7 +92,7 @@ class FrontDoorConfig(BaseModel):
     control_tower_url: str = Field(..., description="Control Tower API URL")
     vault_url: str = Field(..., description="Secrets vault URL")
     jwt_service_url: str = Field(..., description="JWT validation service URL")
-    redis_url: str = Field(default="redis://localhost:6379")
+    redis_url: Optional[str] = Field(default=None, description="Redis URL for caching (optional)")
     cache_ttl_seconds: int = Field(default=300, description="Manifest cache TTL")
     module_pool_size: int = Field(default=10, description="Max modules in memory")
     request_timeout: int = Field(default=30)
@@ -200,13 +219,18 @@ class FrontDoorService:
     async def initialize(self):
         """Initialize service connections"""
         # Redis for caching (optional)
-        if redis is not None:
+        if redis is not None and hasattr(self.config, 'redis_url') and self.config.redis_url:
             try:
+                logger.debug(f"Attempting Redis connection to: {self.config.redis_url}")
                 self.redis_client = redis.from_url(self.config.redis_url)
+                # Test the connection
+                await self.redis_client.ping()
+                logger.info("Redis connection successful")
             except Exception as e:
-                print(f"Warning: Failed to connect to Redis: {e}")
+                logger.warning(f"Failed to connect to Redis: {e}")
                 self.redis_client = None
         else:
+            logger.info("Redis not configured - caching disabled")
             self.redis_client = None
         
         # HTTP client for external services
@@ -231,11 +255,17 @@ class FrontDoorService:
         2. Header-based: X-Project-Module header
         3. Subdomain-based: {project}-{module}.api.company.com
         """
+        logger.debug(f"Parsing request target from URL: {request.url}")
+        logger.debug(f"Request headers: {dict(request.headers)}")
+        
         # Try path-based first (recommended approach)
         path_parts = request.url.path.strip("/").split("/")
+        logger.debug(f"Path parts: {path_parts}")
+        
         if len(path_parts) >= 2:
             project = path_parts[0]
             module = path_parts[1]
+            logger.debug(f"Found project/module from path: {project}/{module}")
         else:
             # Try header-based
             project_module = request.headers.get("X-Project-Module", "")
@@ -277,10 +307,12 @@ class FrontDoorService:
         manifest_cache_misses.inc()
         
         # Fetch from Control Tower
+        logger.debug(f"Fetching manifest for {project}/{module} from Control Tower")
         response = await self.http_client.get(
-            f"{self.config.control_tower_url}/manifests/{project}/{module}",
+            f"{self.config.control_tower_url}/manifests/{project}/modules/{module}",
             params={"environment": environment}
         )
+        logger.debug(f"Control Tower response: {response.status_code}")
         
         if response.status_code != 200:
             raise HTTPException(
@@ -402,6 +434,7 @@ class FrontDoorService:
     
     async def handle_request(self, request: Request) -> Response:
         """Main request handler"""
+        logger.debug(f"Handling request: {request.method} {request.url}")
         start_time = time.time()
         
         # Initialize variables for metrics
@@ -410,7 +443,9 @@ class FrontDoorService:
         
         try:
             # Parse request target
+            logger.debug("Parsing request target...")
             project, module, environment = self.parse_request_target(request)
+            logger.info(f"Request routed to: {project}/{module} (env: {environment})")
             
             # Increment metrics
             request_counter.labels(project=project, module=module, environment=environment).inc()
@@ -463,9 +498,11 @@ class FrontDoorService:
                     headers=module_response.headers
                 )
                 
-        except HTTPException:
+        except HTTPException as he:
+            logger.warning(f"HTTP exception: {he.status_code} - {he.detail}")
             raise
         except Exception as e:
+            logger.error(f"Unexpected error handling request: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
         finally:
             # Record request duration
@@ -506,7 +543,7 @@ config = FrontDoorConfig(
     control_tower_url=os.getenv("CONTROL_TOWER_URL", "http://localhost:8081"),
     vault_url=os.getenv("VAULT_URL", "http://localhost:8200"),
     jwt_service_url=os.getenv("JWT_SERVICE_URL", "http://localhost:8082"),
-    redis_url=os.getenv("REDIS_URL", "redis://localhost:6379")
+    redis_url=os.getenv("REDIS_URL")  # Will be None if not set
 )
 
 app.state.front_door = FrontDoorService(config)
