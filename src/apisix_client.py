@@ -446,19 +446,17 @@ class APISIXClient:
         
         # Create a consumer for this project
         try:
-            consumer_username = f"{project_id}-consumer"
+            consumer_username = f"{project_id.replace('-', '_')}_consumer"
             consumer_desc = f"Consumer for project: {project_name} ({environment})"
             
             # Add JWT plugin if JWT module exists
             consumer_plugins = {}
             if jwt_module and jwt_module.get("config"):
                 jwt_config = jwt_module.get("config", {})
-                # Simplified JWT auth plugin configuration for consumer
+                # Proper JWT auth plugin configuration for consumer
                 consumer_plugins["jwt-auth"] = {
                     "key": f"{project_id}-key",
-                    "secret": jwt_config.get("secret_key", "default-secret"),
-                    "algorithm": jwt_config.get("algorithm", "HS256")
-                    # Removed 'exp' as it might not be valid for consumer-level JWT config
+                    "secret": jwt_config.get("secret_key", "your-secret-key")
                 }
             
             consumer = APISIXConsumer(
