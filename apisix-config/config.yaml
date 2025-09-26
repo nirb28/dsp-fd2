@@ -1,0 +1,168 @@
+# APISIX configuration
+deployment:
+  role: traditional
+  role_traditional:
+    config_provider: etcd
+  admin:
+    # Admin API configuration
+    allow_admin:
+      - 0.0.0.0/0  # Allow all in development, restrict in production
+    admin_key:
+      - name: "admin"
+        key: edd1c9f034335f136f87ad84b625c8f1
+        role: admin
+    admin_listen:
+      ip: 0.0.0.0
+      port: 9180
+  etcd:
+    host:
+      - "http://etcd:2379"
+    prefix: /apisix
+    timeout: 30
+
+# Gateway configuration
+apisix:
+  node_listen:
+    - 9080
+    - port: 9443
+      enable_http2: true
+      ssl: true
+  
+  ssl:
+    enable: false
+    listen:
+      - port: 9443
+        enable_http2: true
+  
+  # Enable plugins
+  plugins:
+    - real-ip
+    - client-control
+    - proxy-control
+    - request-id
+    - zipkin
+    - request-validation
+    - fault-injection
+    - serverless-pre-function
+    - serverless-post-function
+    - cors
+    - ip-restriction
+    - ua-restriction
+    - referer-restriction
+    - consumer-restriction
+    - csrf
+    - uri-blocker
+    - basic-auth
+    - key-auth
+    - jwt-auth
+    - authz-keycloak
+    - authz-casdoor
+    - wolf-rbac
+    - ldap-auth
+    - hmac-auth
+    - openid-connect
+    - opa
+    - forward-auth
+    - api-breaker
+    - limit-conn
+    - limit-count
+    - limit-req
+    - node-status
+    - gzip
+    - server-info
+    - traffic-split
+    - redirect
+    - response-rewrite
+    - proxy-rewrite
+    - grpc-transcode
+    - grpc-web
+    - prometheus
+    - datadog
+    - echo
+    - http-logger
+    - tcp-logger
+    - udp-logger
+    - syslog
+    - kafka-logger
+    - rocketmq-logger
+    - skywalking
+    - google-cloud-logging
+    - splunk-hec-logging
+    - file-logger
+    - elasticsearch-logger
+    - loggly
+    - tencent-cloud-cls
+    - clickhouse-logger
+    - opentelemetry
+    - aws-lambda
+    - azure-functions
+    - ext-plugin-pre-req
+    - ext-plugin-post-req
+    - ext-plugin-post-resp
+    - workflow
+
+  # Stream proxy plugins (for TCP/UDP)
+  stream_plugins:
+    - ip-restriction
+    - limit-conn
+    - mqtt-proxy
+    - syslog
+
+# Nginx configuration
+nginx_config:
+  error_log_level: warn
+  event:
+    worker_connections: 10620
+  http:
+    enable_access_log: true
+    access_log_format: |
+      $remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent 
+      "$http_referer" "$http_user_agent" $upstream_addr $upstream_status 
+      $upstream_response_time "$upstream_scheme://$upstream_host$upstream_uri"
+    
+    upstream:
+      keepalive: 320
+      keepalive_requests: 1000
+      keepalive_timeout: 60s
+    
+    # AI/LLM specific settings
+    proxy_buffer_size: 16k
+    proxy_buffers: 8 32k
+    proxy_busy_buffers_size: 64k
+    client_max_body_size: 100m
+    client_body_buffer_size: 100m
+    
+    # Streaming settings for LLM responses
+    proxy_buffering: "off"
+    proxy_request_buffering: "on"
+
+# Plugin configurations
+plugin_attr:
+  prometheus:
+    export_uri: /metrics
+    export_addr:
+      ip: 0.0.0.0
+      port: 9091
+    metric_prefix: apisix_
+    enable_export_server: true
+  
+  skywalking:
+    service_name: APISIX
+    service_instance_name: APISIX-Gateway
+    endpoint_addr: http://skywalking:11800
+  
+  opentelemetry:
+    trace_id_source: x-request-id
+    resource:
+      service.name: APISIX-Gateway
+    collector:
+      address: localhost:4317
+    batch_span_processor:
+      drop_on_queue_full: false
+      max_queue_size: 1024
+      batch_timeout: 2
+      inactive_timeout: 1
+      max_export_batch_size: 16
+    
+  server-info:
+    report_ttl: 60
