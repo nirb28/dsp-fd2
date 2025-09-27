@@ -9,7 +9,7 @@ import httpx
 
 # Configuration
 FRONT_DOOR_URL = "http://localhost:8080"
-CONTROL_TOWER_URL = "http://localhost:8081"
+CONTROL_TOWER_URL = "http://localhost:8000"
 CONTROL_TOWER_SECRET = "dspsa_p@ssword"
 
 
@@ -212,45 +212,70 @@ async def create_test_manifests():
     
     # Manifest with APISIX
     manifest_with_apisix = {
-        "manifest": {
-            "project_id": "test-apisix-routing",
-            "project_name": "Test APISIX Routing",
-            "version": "1.0.0",
-            "modules": [
-                {
-                    "module_type": "api_gateway",
-                    "name": "test-apisix-gateway",
-                    "config": {
-                        "routes": [
-                            {
-                                "name": "test-route",
-                                "uri": "/test",
-                                "methods": ["GET"]
-                            }
-                        ]
-                    }
+        "project_id": "test-apisix-routing",
+        "project_name": "Test APISIX Routing",
+        "version": "1.0.0",
+        "description": "Test project for APISIX routing",
+        "owner": "test-team",
+        "team": ["test@example.com"],
+        "tags": ["test", "apisix"],
+        "environment": "test",
+        "modules": [
+            {
+                "module_type": "api_gateway",
+                "name": "test-apisix-gateway",
+                "version": "1.0.0",
+                "status": "enabled",
+                "description": "Test APISIX Gateway",
+                "dependencies": [],
+                "cross_references": {},
+                "environment_overrides": {},
+                "config": {
+                    "admin_api_url": "http://localhost:9180",
+                    "admin_key": "edd1c9f034335f136f87ad84b625c8f1",
+                    "gateway_url": "http://localhost:9080",
+                    "routes": [
+                        {
+                            "name": "test-route",
+                            "uri": "/test",
+                            "methods": ["GET"],
+                            "plugins": []
+                        }
+                    ],
+                    "upstreams": [],
+                    "global_plugins": []
                 }
-            ]
-        }
+            }
+        ]
     }
     
     # Manifest without APISIX (direct routing)
     manifest_direct = {
-        "manifest": {
-            "project_id": "test-direct-routing",
-            "project_name": "Test Direct Routing",
-            "version": "1.0.0",
-            "modules": [
-                {
-                    "module_type": "inference_endpoint",
-                    "name": "test-llm",
-                    "config": {
-                        "model": "test-model",
-                        "endpoint": "http://localhost:8000"
-                    }
+        "project_id": "test-direct-routing",
+        "project_name": "Test Direct Routing",
+        "version": "1.0.0",
+        "description": "Test project for direct routing",
+        "owner": "test-team",
+        "team": ["test@example.com"],
+        "tags": ["test", "direct"],
+        "environment": "test",
+        "modules": [
+            {
+                "module_type": "inference_endpoint",
+                "name": "test-llm",
+                "version": "1.0.0",
+                "status": "enabled",
+                "description": "Test LLM Endpoint",
+                "dependencies": [],
+                "cross_references": {},
+                "environment_overrides": {},
+                "config": {
+                    "model": "test-model",
+                    "endpoint": "http://localhost:8000",
+                    "timeout": 30
                 }
-            ]
-        }
+            }
+        ]
     }
     
     async with httpx.AsyncClient() as client:
@@ -258,11 +283,13 @@ async def create_test_manifests():
         try:
             response = await client.post(
                 f"{CONTROL_TOWER_URL}/manifests",
-                json=manifest_with_apisix,
+                json={"manifest": manifest_with_apisix},
                 headers=headers
             )
             if response.status_code in [201, 409]:
                 print("✓ APISIX test manifest created/exists")
+            else:
+                print(f"  Warning: APISIX manifest creation failed: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"  Warning: Could not create APISIX manifest: {e}")
         
@@ -270,11 +297,13 @@ async def create_test_manifests():
         try:
             response = await client.post(
                 f"{CONTROL_TOWER_URL}/manifests",
-                json=manifest_direct,
+                json={"manifest": manifest_direct},
                 headers=headers
             )
             if response.status_code in [201, 409]:
                 print("✓ Direct routing test manifest created/exists")
+            else:
+                print(f"  Warning: Direct manifest creation failed: {response.status_code} - {response.text}")
         except Exception as e:
             print(f"  Warning: Could not create direct manifest: {e}")
 
