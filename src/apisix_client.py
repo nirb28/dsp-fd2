@@ -49,7 +49,7 @@ class APISIXUpstream(BaseModel):
     retries: int = 1
     retry_timeout: int = 0
     pass_host: str = "pass"
-    scheme: str = "http"
+    scheme: str = Field(default="https")  # Default to http, but can be overridden by manifest
     hash_on: Optional[str] = None
 
 
