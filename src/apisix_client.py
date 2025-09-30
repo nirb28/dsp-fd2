@@ -427,22 +427,20 @@ class APISIXClient:
         project_name = manifest.get("project_name", "Unknown Project")
         environment = manifest.get("environment", "default")
         
-        # Find APISIX gateway module in manifest
+        # Find APISIX gateway modules in manifest
         modules = manifest.get("modules", [])
-        apisix_module = None
+        apisix_modules = []
         jwt_module = None
         
         for module in modules:
             if module.get("module_type") == "api_gateway" and "apisix" in module.get("name", "").lower():
-                apisix_module = module
+                apisix_modules.append(module)
             elif module.get("module_type") == "jwt_config":
                 jwt_module = module
         
-        if not apisix_module:
+        if not apisix_modules:
             results["errors"].append("No APISIX gateway module found in manifest")
             return results
-        
-        config = apisix_module.get("config", {})
         
         # Create a consumer for this project
         try:
@@ -478,18 +476,11 @@ class APISIXClient:
             service_name = f"{project_id}-api-service"
             service_desc = f"API Service for {project_name} - Environment: {environment}"
             
-            # Get the first upstream if available
-            upstream_id = None
-            if config.get("upstreams"):
-                first_upstream = config["upstreams"][0]
-                upstream_id = f"{project_id}-{first_upstream.get('name', 'upstream')}"
-            
             service = APISIXService(
                 id=service_id,
                 name=service_name,
                 desc=service_desc,
-                upstream_id=upstream_id,
-                enable_websocket=config.get("streaming_enabled", False)
+                enable_websocket=False
             )
             
             result = await self.create_service(service)
@@ -500,72 +491,82 @@ class APISIXClient:
             logger.error(error_msg)
             results["errors"].append(error_msg)
         
-        # Create upstreams with project prefix
-        for upstream_config in config.get("upstreams", []):
-            try:
-                # Add project prefix to upstream name and ID
-                original_name = upstream_config.get("name", "upstream")
-                upstream_config["name"] = f"{project_id}-{original_name}"
-                upstream_config["id"] = f"{project_id}-{original_name}"
-                
-                upstream = APISIXUpstream(**upstream_config)
-                result = await self.create_upstream(upstream)
-                results["upstreams"].append(result)
-                logger.info(f"Created upstream: {upstream.name}")
-            except Exception as e:
-                error_msg = f"Failed to create upstream {upstream_config.get('name')}: {str(e)}"
-                logger.error(error_msg)
-                results["errors"].append(error_msg)
-        
-        # Create routes with project prefix and link to service
-        for route_config in config.get("routes", []):
-            try:
-                # Add project prefix to route name and ID
-                original_name = route_config.get("name", "route")
-                route_config["name"] = f"{project_id}-{original_name}"
-                route_config["id"] = f"{project_id}-{original_name}"
-                
-                # Link route to the project service
-                route_config["service_id"] = f"{project_id}-service"
-                
-                # Update URI to include project prefix if not already present
-                original_uri = route_config.get("uri", "/")
-                if not original_uri.startswith(f"/{project_id}"):
-                    route_config["uri"] = f"/{project_id}{original_uri}"
-                
-                # Add description metadata
-                route_config["desc"] = f"Route for {project_name} - {original_name}"
-                
-                # Convert plugin list to dict format expected by APISIX
-                plugins_dict = {}
-                for plugin in route_config.get("plugins", []):
-                    if plugin.get("enabled", True):
-                        plugin_config = plugin.get("config", {})
-                        
-                        # Update JWT plugin to use project consumer
-                        if plugin["name"] == "jwt-auth":
-                            plugin_config["key"] = f"{project_id}-key"
-                        
-                        plugins_dict[plugin["name"]] = plugin_config
-                
-                # Note: Metadata tracking removed as APISIX doesn't have a metadata plugin
-                # Project info is tracked via route names and descriptions instead
-                
-                route_config["plugins"] = plugins_dict
-                route = APISIXRoute(**route_config)
-                result = await self.create_route(route)
-                results["routes"].append(result)
-                logger.info(f"Created route: {route.name}")
-            except Exception as e:
-                error_msg = f"Failed to create route {route_config.get('name')}: {str(e)}"
-                logger.error(error_msg)
-                results["errors"].append(error_msg)
-        
+        # Process all APISIX modules
+        for apisix_module in apisix_modules:
+            config = apisix_module.get("config", {})
+            
+            # Create upstreams with project prefix
+            for upstream_config in config.get("upstreams", []):
+                try:
+                    # Add project prefix to upstream name and ID
+                    original_name = upstream_config.get("name", "upstream")
+                    upstream_config["name"] = f"{project_id}-{original_name}"
+                    upstream_config["id"] = f"{project_id}-{original_name}"
+                    
+                    upstream = APISIXUpstream(**upstream_config)
+                    result = await self.create_upstream(upstream)
+                    results["upstreams"].append(result)
+                    logger.info(f"Created upstream: {upstream.name}")
+                except Exception as e:
+                    error_msg = f"Failed to create upstream {upstream_config.get('name')}: {str(e)}"
+                    logger.error(error_msg)
+                    results["errors"].append(error_msg)
+            
+            # Create routes with project prefix and link to service
+            for route_config in config.get("routes", []):
+                try:
+                    # Add project prefix to route name and ID
+                    original_name = route_config.get("name", "route")
+                    route_config["name"] = f"{project_id}-{original_name}"
+                    route_config["id"] = f"{project_id}-{original_name}"
+                    
+                    # Handle upstream inline or reference
+                    if "upstream" in route_config:
+                        # Inline upstream - keep it as is
+                        pass
+                    else:
+                        # Link route to the project service
+                        route_config["service_id"] = f"{project_id}-service"
+                    
+                    # Don't modify URI - keep it as defined in manifest
+                    
+                    # Add description metadata
+                    route_config["desc"] = f"Route for {project_name} - {original_name}"
+                    
+                    # Handle plugins - they're already in dict format in our manifest
+                    plugins_dict = route_config.get("plugins", {})
+                    
+                    # If plugins is a list, convert to dict
+                    if isinstance(plugins_dict, list):
+                        converted_plugins = {}
+                        for plugin in plugins_dict:
+                            if plugin.get("enabled", True):
+                                plugin_config = plugin.get("config", {})
+                                
+                                # Update JWT plugin to use project consumer
+                                if plugin["name"] == "jwt-auth":
+                                    plugin_config["key"] = f"{project_id}-key"
+                                
+                                converted_plugins[plugin["name"]] = plugin_config
+                        plugins_dict = converted_plugins
+                    
+                    route_config["plugins"] = plugins_dict
+                    route = APISIXRoute(**route_config)
+                    result = await self.create_route(route)
+                    results["routes"].append(result)
+                    logger.info(f"Created route: {route.name}")
+                except Exception as e:
+                    error_msg = f"Failed to create route {route_config.get('name')}: {str(e)}"
+                    logger.error(error_msg)
+                    results["errors"].append(error_msg)
+            
         # Set global plugins for this project (if needed)
         global_plugins = {}
-        for plugin in config.get("global_plugins", []):
-            if plugin.get("enabled", True):
-                global_plugins[plugin["name"]] = plugin.get("config", {})
+        for apisix_module in apisix_modules:
+            config = apisix_module.get("config", {})
+            for plugin in config.get("global_plugins", []):
+                if plugin.get("enabled", True):
+                    global_plugins[plugin["name"]] = plugin.get("config", {})
         
         if global_plugins:
             try:
