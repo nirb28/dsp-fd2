@@ -321,29 +321,12 @@ async def create_test_manifests():
     manifest_with_apisix = {
         "project_id": "test-apisix-routing",
         "project_name": "Test APISIX + Inference Combined",
-        "version": "1.0.0",
-        "description": "Test project combining APISIX gateway with inference endpoints",
         "owner": "test-team",
-        "team": ["test@example.com"],
-        "tags": ["test", "apisix", "inference", "combined"],
         "environment": "test",
         "modules": [
             {
                 "module_type": "inference_endpoint",
                 "name": "test-llm-service",
-                "version": "1.0.0",
-                "status": "enabled",
-                "description": "Test LLM Inference Service",
-                "dependencies": [],
-                "cross_references": {
-                    "gateway": {
-                        "module_name": "test-apisix-gateway",
-                        "module_type": "api_gateway",
-                        "purpose": "Receive routed requests from APISIX gateway",
-                        "required": True
-                    }
-                },
-                "environment_overrides": {},
                 "config": {
                     "model_name": "llama-3.1-8b-instant",
                     "model_version": "latest",
@@ -357,19 +340,6 @@ async def create_test_manifests():
             {
                 "module_type": "api_gateway",
                 "name": "test-apisix-gateway",
-                "version": "1.0.0",
-                "status": "enabled",
-                "description": "Test APISIX Gateway with LLM routing",
-                "dependencies": ["test-llm-service"],
-                "cross_references": {
-                    "llm_service": {
-                        "module_name": "test-llm-service",
-                        "module_type": "inference_endpoint",
-                        "purpose": "Route inference requests to LLM service",
-                        "required": True
-                    }
-                },
-                "environment_overrides": {},
                 "config": {
                     "admin_api_url": "http://localhost:9180",
                     "admin_key": "edd1c9f034335f136f87ad84b625c8f1",
@@ -541,32 +511,14 @@ async def create_test_manifests():
     manifest_direct = {
         "project_id": "test-direct-routing",
         "project_name": "Test Direct Multi-Inference",
-        "version": "1.0.0",
-        "description": "Test project with multiple inference endpoints using direct routing",
         "owner": "test-team",
-        "team": ["test@example.com"],
-        "tags": ["test", "direct", "inference", "multi-service"],
         "environment": "test",
         "modules": [
             {
                 "module_type": "inference_endpoint",
                 "name": "test-llm-primary",
-                "version": "1.0.0",
-                "status": "enabled",
-                "description": "Primary Test LLM Endpoint",
-                "dependencies": [],
-                "cross_references": {
-                    "backup_service": {
-                        "module_name": "test-llm-backup",
-                        "module_type": "inference_endpoint",
-                        "purpose": "Fallback service for high availability",
-                        "required": False
-                    }
-                },
-                "environment_overrides": {},
                 "config": {
                     "model_name": "test-primary-model",
-                    "model_version": "v1.0",
                     "endpoint_url": "http://localhost:8001/v1/completions",
                     "system_prompt": "You are the primary AI assistant.",
                     "max_tokens": 4096,
@@ -577,22 +529,8 @@ async def create_test_manifests():
             {
                 "module_type": "inference_endpoint",
                 "name": "test-llm-backup",
-                "version": "1.0.0",
-                "status": "enabled",
-                "description": "Backup Test LLM Endpoint",
-                "dependencies": [],
-                "cross_references": {
-                    "primary_service": {
-                        "module_name": "test-llm-primary",
-                        "module_type": "inference_endpoint",
-                        "purpose": "Primary service that this backs up",
-                        "required": True
-                    }
-                },
-                "environment_overrides": {},
                 "config": {
                     "model_name": "test-backup-model",
-                    "model_version": "v1.0",
                     "endpoint_url": "http://localhost:8002/v1/completions",
                     "system_prompt": "You are the backup AI assistant.",
                     "max_tokens": 2048,
@@ -607,29 +545,12 @@ async def create_test_manifests():
     manifest_groq_apisix = {
         "project_id": "test-groq-apisix",
         "project_name": "Test Groq APISIX Integration",
-        "version": "1.0.0",
-        "description": "Test project with Groq LLM via APISIX ai-proxy plugin",
         "owner": "test-team",
-        "team": ["test@example.com"],
-        "tags": ["test", "groq", "apisix", "ai-proxy"],
         "environment": "test",
         "modules": [
             {
                 "module_type": "inference_endpoint",
                 "name": "groq-llm-service",
-                "version": "1.0.0",
-                "status": "enabled",
-                "description": "Groq LLM Inference Service via APISIX",
-                "dependencies": ["groq-apisix-gateway"],
-                "cross_references": {
-                    "gateway": {
-                        "module_name": "groq-apisix-gateway",
-                        "module_type": "api_gateway",
-                        "purpose": "Route requests through APISIX ai-proxy to Groq API",
-                        "required": True
-                    }
-                },
-                "environment_overrides": {},
                 "config": {
                     "model_name": "llama-3.1-8b-instant",
                     "model_version": "latest",
@@ -645,19 +566,6 @@ async def create_test_manifests():
             {
                 "module_type": "api_gateway",
                 "name": "groq-apisix-gateway",
-                "version": "1.0.0",
-                "status": "enabled",
-                "description": "APISIX Gateway with Groq ai-proxy integration",
-                "dependencies": [],
-                "cross_references": {
-                    "groq_service": {
-                        "module_name": "groq-llm-service",
-                        "module_type": "inference_endpoint",
-                        "purpose": "Proxy requests to Groq API with authentication",
-                        "required": True
-                    }
-                },
-                "environment_overrides": {},
                 "config": {
                     "admin_api_url": "http://localhost:9180",
                     "admin_key": "edd1c9f034335f136f87ad84b625c8f1",
