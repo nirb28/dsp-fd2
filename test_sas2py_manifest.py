@@ -158,31 +158,43 @@ async def verify_apisix_routes():
 
 
 async def get_jwt_token() -> str:
-    """Get JWT token from Control Tower"""
+    """Get JWT token from JWT service"""
     print("\n3. Getting JWT token...")
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            response = await client.post(
-                f"{CONTROL_TOWER_URL}/token",
-                data={
-                    "username": "admin",
-                    "password": "dspsa_p@ssword"
-                }
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                token = data.get("access_token")
-                print(f"✓ Token obtained")
-                return token
-            else:
-                print(f"✗ Failed to get token: {response.status_code}")
-                return None
-                
-        except Exception as e:
-            print(f"✗ Token error: {str(e)}")
+    # Import JWT client
+    sys.path.insert(0, str(Path(__file__).parent / "src"))
+    from jwt_client import JWTClient
+    
+    # Use JWT service (default port 5000)
+    jwt_service_url = "http://localhost:5000"
+    jwt_client = JWTClient(jwt_service_url)
+    
+    try:
+        # Use the same secret that APISIX consumer is configured with
+        # This should match the JWT_SECRET_KEY in the JWT service .env file
+        jwt_secret = "dev-secret-key"  # Default from JWT service
+        
+        result = await jwt_client.generate_token(
+            username="admin",
+            password="password",
+            api_key="api_key_sas2py",  # Use sas2py API key for APISIX integration
+            custom_secret=jwt_secret  # Sign with the same secret APISIX expects
+        )
+        
+        await jwt_client.close()
+        
+        if result.get("success"):
+            token = result.get("access_token")
+            print(f"✓ Token obtained from JWT service")
+            return token
+        else:
+            print(f"✗ Failed to get token: {result.get('error')}")
             return None
+            
+    except Exception as e:
+        print(f"✗ Token error: {str(e)}")
+        await jwt_client.close()
+        return None
 
 
 async def test_convert_endpoint(token: str):
@@ -213,7 +225,7 @@ RUN;
             }
             
             response = await client.post(
-                f"{FRONT_DOOR_URL}/api/sas2py/convert",
+                f"{FRONT_DOOR_URL}/sas2py/convert",
                 headers=headers,
                 json=payload
             )
@@ -255,7 +267,7 @@ def multiply_numbers(a: int, b: int) -> int:
             }
             
             response = await client.post(
-                f"{FRONT_DOOR_URL}/api/sas2py/test",
+                f"{FRONT_DOOR_URL}/sas2py/test",
                 headers=headers,
                 json=payload
             )

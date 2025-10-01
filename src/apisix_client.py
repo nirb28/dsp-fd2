@@ -11,6 +11,8 @@ from datetime import datetime
 import httpx
 from pydantic import BaseModel, Field
 
+from jwt_client import JWTClient
+
 logger = logging.getLogger(__name__)
 
 
@@ -443,20 +445,32 @@ class APISIXClient:
             results["errors"].append("No APISIX gateway module found in manifest")
             return results
         
-        # Create a consumer for this project
+        # Create a consumer for this project with JWT integration
         try:
             consumer_username = f"{project_id.replace('-', '_')}_consumer"
             consumer_desc = f"Consumer for project: {project_name} ({environment})"
             
             # Add JWT plugin if JWT module exists
             consumer_plugins = {}
+            jwt_service_url = None
+            
             if jwt_module and jwt_module.get("config"):
                 jwt_config = jwt_module.get("config", {})
+                
+                # Check if JWT service URL is provided for integration
+                jwt_service_url = jwt_config.get("service_url") or jwt_config.get("jwt_service_url")
+                
                 # Proper JWT auth plugin configuration for consumer
                 consumer_plugins["jwt-auth"] = {
                     "key": f"{project_id}-key",
-                    "secret": jwt_config.get("secret_key", "your-secret-key")
+                    "secret": jwt_config.get("secret_key", "your-secret-key"),
+                    "algorithm": jwt_config.get("algorithm", "HS256")
                 }
+                
+                # Store JWT service info for later use
+                if jwt_service_url:
+                    logger.info(f"JWT service integration enabled for {project_id}: {jwt_service_url}")
+                    results["jwt_service_url"] = jwt_service_url
             
             consumer = APISIXConsumer(
                 username=consumer_username,
