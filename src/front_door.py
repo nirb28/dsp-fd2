@@ -291,7 +291,7 @@ class UnifiedFrontDoorService:
                 headers["X-DSPAI-Client-Secret"] = self.config.control_tower_secret
             
             response = await self.http_client.get(
-                f"{self.config.control_tower_url}/manifests/{project_id}",
+                f"{self.config.control_tower_url}/manifests/{project_id}?resolve_env=true",
                 headers=headers
             )
             
@@ -507,7 +507,7 @@ class UnifiedFrontDoorService:
                 headers["X-DSPAI-Client-Secret"] = self.config.control_tower_secret
             
             response = await self.http_client.get(
-                f"{self.config.control_tower_url}/manifests/{project_id}",
+                f"{self.config.control_tower_url}/manifests/{project_id}?resolve_env=true",
                 headers=headers
             )
             

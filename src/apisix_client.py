@@ -28,6 +28,7 @@ class APISIXRoute(BaseModel):
     name: str
     uri: str
     methods: List[str] = Field(default_factory=lambda: ["GET", "POST"])
+    upstream: Optional[Dict[str, Any]] = None  # Inline upstream configuration
     upstream_id: Optional[str] = None
     service_id: Optional[str] = None
     plugins: Dict[str, Any] = Field(default_factory=dict)
@@ -495,7 +496,7 @@ class APISIXClient:
         for apisix_module in apisix_modules:
             config = apisix_module.get("config", {})
             
-            # Create upstreams with project prefix
+            # Create upstreams with project prefix (from separate upstreams array)
             for upstream_config in config.get("upstreams", []):
                 try:
                     # Add project prefix to upstream name and ID
@@ -512,6 +513,39 @@ class APISIXClient:
                     logger.error(error_msg)
                     results["errors"].append(error_msg)
             
+            # Extract and create inline upstreams from routes as separate resources
+            upstream_id_mapping = {}  # Map original route name to upstream ID
+            for route_config in config.get("routes", []):
+                if "upstream" in route_config:
+                    try:
+                        original_route_name = route_config.get("name", "route")
+                        upstream_data = route_config["upstream"].copy()
+                        
+                        # Create upstream with route-based naming
+                        upstream_name = f"{original_route_name}-upstream"
+                        upstream_id = f"{project_id}-{upstream_name}"
+                        
+                        upstream = APISIXUpstream(
+                            id=upstream_id,
+                            name=f"{project_id}-{upstream_name}",
+                            type=upstream_data.get("type", "roundrobin"),
+                            nodes=upstream_data.get("nodes", {}),
+                            timeout=upstream_data.get("timeout", {"connect": 30, "send": 30, "read": 30}),
+                            retries=upstream_data.get("retries", 1),
+                            retry_timeout=upstream_data.get("retry_timeout", 0),
+                            pass_host=upstream_data.get("pass_host", "pass"),
+                            scheme=upstream_data.get("scheme", "https")
+                        )
+                        
+                        result = await self.create_upstream(upstream)
+                        results["upstreams"].append(result)
+                        upstream_id_mapping[original_route_name] = upstream_id
+                        logger.info(f"Created inline upstream: {upstream.name}")
+                    except Exception as e:
+                        error_msg = f"Failed to create inline upstream for route {route_config.get('name')}: {str(e)}"
+                        logger.error(error_msg)
+                        results["errors"].append(error_msg)
+            
             # Create routes with project prefix and link to service
             for route_config in config.get("routes", []):
                 try:
@@ -522,8 +556,11 @@ class APISIXClient:
                     
                     # Handle upstream inline or reference
                     if "upstream" in route_config:
-                        # Inline upstream - keep it as is
-                        pass
+                        # Replace inline upstream with upstream_id reference
+                        if original_name in upstream_id_mapping:
+                            route_config["upstream_id"] = upstream_id_mapping[original_name]
+                            del route_config["upstream"]  # Remove inline upstream
+                        # else: keep inline upstream as fallback
                     else:
                         # Link route to the project service
                         route_config["service_id"] = f"{project_id}-service"
