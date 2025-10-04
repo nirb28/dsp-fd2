@@ -199,17 +199,23 @@ async def test_convert_endpoint(token: str):
     """Test the /api/sas2py/convert endpoint"""
     print("\n4. Testing convert endpoint...")
     
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    # Disable auto-decompression to avoid gzip errors
+    # Set default_encoding to None to prevent automatic decompression
+    async with httpx.AsyncClient(
+        timeout=60.0, 
+        follow_redirects=True,
+        default_encoding="utf-8"
+    ) as client:
         try:
             headers = {
                 "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "Accept-Encoding": "identity"  # Disable compression
             }
             
-            payload = {
-                "template_name": "converter",
-                "user_input": """
-DATA work.example;
+            # Note: ai-prompt-template plugin doesn't properly escape newlines in JSON
+            # So we need to escape them manually or use a single line
+            sas_code = """DATA work.example;
     INPUT name $ age salary;
     DATALINES;
 John 30 50000
@@ -219,8 +225,11 @@ RUN;
 
 PROC MEANS DATA=work.example;
     VAR age salary;
-RUN;
-"""
+RUN;"""
+            
+            payload = {
+                "template_name": "converter",
+                "user_input": sas_code.replace('\n', '\\n')  # Escape newlines for JSON
             }
             
             response = await client.post(
@@ -229,18 +238,31 @@ RUN;
                 json=payload
             )
             
+            print(f"  Status: {response.status_code}")
+            print(f"  Response headers: {dict(response.headers)}")
+            
             if response.status_code == 200:
-                data = response.json()
-                print(f"✓ Convert endpoint successful")
-                print(f"  Response preview: {str(data)[:200]}...")
-                return True
+                try:
+                    data = response.json()
+                    print(f"✓ Convert endpoint successful")
+                    print(f"  Response preview: {str(data)[:200]}...")
+                    return True
+                except Exception as json_err:
+                    print(f"✗ JSON decode error: {json_err}")
+                    print(f"  Raw response (first 500 bytes): {response.content[:500]}")
+                    return False
             else:
                 print(f"✗ Convert failed: {response.status_code}")
-                print(f"  Response: {response.text[:500]}")
+                try:
+                    print(f"  Response: {response.text[:500]}")
+                except:
+                    print(f"  Raw response: {response.content[:500]}")
                 return False
                 
         except Exception as e:
             print(f"✗ Convert error: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
 
 
@@ -248,21 +270,30 @@ async def test_test_endpoint(token: str):
     """Test the /api/sas2py/test endpoint"""
     print("\n5. Testing test generation endpoint...")
     
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    # Disable auto-decompression to avoid gzip errors
+    # Set default_encoding to None to prevent automatic decompression
+    async with httpx.AsyncClient(
+        timeout=60.0, 
+        follow_redirects=True,
+        default_encoding="utf-8"
+    ) as client:
         try:
             headers = {
                 "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "Accept-Encoding": "identity"  # Disable compression
             }
             
-            payload = {
-                "user_input": """
-def add_numbers(a: int, b: int) -> int:
+            # Note: ai-prompt-template plugin doesn't properly escape newlines in JSON
+            python_code = """def add_numbers(a: int, b: int) -> int:
     return a + b
 
 def multiply_numbers(a: int, b: int) -> int:
-    return a * b
-"""
+    return a * b"""
+            
+            payload = {
+                "template_name": "python-test-generator",
+                "user_input": python_code.replace('\n', '\\n')  # Escape newlines for JSON
             }
             
             response = await client.post(
@@ -271,18 +302,31 @@ def multiply_numbers(a: int, b: int) -> int:
                 json=payload
             )
             
+            print(f"  Status: {response.status_code}")
+            print(f"  Response headers: {dict(response.headers)}")
+            
             if response.status_code == 200:
-                data = response.json()
-                print(f"✓ Test endpoint successful")
-                print(f"  Response preview: {str(data)[:200]}...")
-                return True
+                try:
+                    data = response.json()
+                    print(f"✓ Test endpoint successful")
+                    print(f"  Response preview: {str(data)[:200]}...")
+                    return True
+                except Exception as json_err:
+                    print(f"✗ JSON decode error: {json_err}")
+                    print(f"  Raw response (first 500 bytes): {response.content[:500]}")
+                    return False
             else:
                 print(f"✗ Test failed: {response.status_code}")
-                print(f"  Response: {response.text[:500]}")
+                try:
+                    print(f"  Response: {response.text[:500]}")
+                except:
+                    print(f"  Raw response: {response.content[:500]}")
                 return False
                 
         except Exception as e:
             print(f"✗ Test error: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
 
 
