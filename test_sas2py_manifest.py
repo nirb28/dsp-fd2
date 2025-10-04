@@ -1,6 +1,11 @@
 """
 Test script for sas2py manifest integration
 Tests APISIX sync and inference endpoint routing
+
+Vault Setup:
+curl -X POST http://localhost:8200/v1/secret/data/sas2py/api-keys \
+  -H "X-Vault-Token: myroot" \
+  -d '{"data": {"groq_api_key": "test-groq-key-xyz"}}'
 """
 
 import asyncio
@@ -209,6 +214,7 @@ async def test_convert_endpoint(token: str):
             }
             
             payload = {
+                "template_name": "converter",
                 "user_input": """
 DATA work.example;
     INPUT name $ age salary;

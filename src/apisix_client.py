@@ -445,66 +445,53 @@ class APISIXClient:
             results["errors"].append("No APISIX gateway module found in manifest")
             return results
         
-        # Create a consumer for this project with JWT integration
-        try:
-            consumer_username = f"{project_id.replace('-', '_')}_consumer"
-            consumer_desc = f"Consumer for project: {project_name} ({environment})"
-            
-            # Add JWT plugin if JWT module exists
-            consumer_plugins = {}
-            jwt_service_url = None
-            
-            if jwt_module and jwt_module.get("config"):
-                jwt_config = jwt_module.get("config", {})
-                
-                # Check if JWT service URL is provided for integration
-                jwt_service_url = jwt_config.get("service_url") or jwt_config.get("jwt_service_url")
-                
-                # Proper JWT auth plugin configuration for consumer
-                consumer_plugins["jwt-auth"] = {
-                    "key": f"{project_id}-key",
-                    "secret": jwt_config.get("secret_key", "your-secret-key"),
-                    "algorithm": jwt_config.get("algorithm", "HS256")
-                }
-                
-                # Store JWT service info for later use
-                if jwt_service_url:
-                    logger.info(f"JWT service integration enabled for {project_id}: {jwt_service_url}")
-                    results["jwt_service_url"] = jwt_service_url
-            
-            consumer = APISIXConsumer(
-                username=consumer_username,
-                desc=consumer_desc,
-                plugins=consumer_plugins
-            )
-            result = await self.create_consumer(consumer)
-            results["consumers"].append(result)
-            logger.info(f"Created consumer: {consumer_username}")
-        except Exception as e:
-            error_msg = f"Failed to create consumer for {project_id}: {str(e)}"
-            logger.error(error_msg)
-            results["errors"].append(error_msg)
+        # Check if consumer/service are defined in any APISIX module
+        consumer_config = None
+        service_config = None
+        for apisix_module in apisix_modules:
+            config = apisix_module.get("config", {})
+            if config.get("consumer") and not consumer_config:
+                consumer_config = config.get("consumer")
+            if config.get("service") and not service_config:
+                service_config = config.get("service")
         
-        # Create a service for this project to group all routes
-        try:
-            service_id = f"{project_id}-service"
-            service_name = f"{project_id}-api-service"
-            service_desc = f"API Service for {project_name} - Environment: {environment}"
-            
-            service = APISIXService(
-                id=service_id,
-                name=service_name,
-                desc=service_desc,
-                enable_websocket=False
-            )
-            
-            result = await self.create_service(service)
-            results["services"].append(result)
-            logger.info(f"Created service: {service_name}")
-        except Exception as e:
-            error_msg = f"Failed to create service for {project_id}: {str(e)}"
-            logger.error(error_msg)
-            results["errors"].append(error_msg)
+        # Create consumer if defined in manifest
+        if consumer_config:
+            try:
+                # Add project_id prefix to username if not already present
+                username = consumer_config.get("username", "consumer")
+                if not username.startswith(f"{project_id}_"):
+                    consumer_config["username"] = f"{project_id}_{username}"
+                
+                consumer = APISIXConsumer(**consumer_config)
+                result = await self.create_consumer(consumer)
+                results["consumers"].append(result)
+                logger.info(f"Created consumer from manifest: {consumer.username}")
+            except Exception as e:
+                error_msg = f"Failed to create consumer: {str(e)}"
+                logger.error(error_msg)
+                results["errors"].append(error_msg)
+        
+        # Create service if defined in manifest
+        if service_config:
+            try:
+                # Add project_id prefix to service id and name if not already present
+                service_id = service_config.get("id", "service")
+                if not service_id.startswith(f"{project_id}-"):
+                    service_config["id"] = f"{project_id}-{service_id}"
+                
+                service_name = service_config.get("name", "service")
+                if not service_name.startswith(f"{project_id}-"):
+                    service_config["name"] = f"{project_id}-{service_name}"
+                
+                service = APISIXService(**service_config)
+                result = await self.create_service(service)
+                results["services"].append(result)
+                logger.info(f"Created service from manifest: {service.name}")
+            except Exception as e:
+                error_msg = f"Failed to create service: {str(e)}"
+                logger.error(error_msg)
+                results["errors"].append(error_msg)
         
         # Process all APISIX modules
         for apisix_module in apisix_modules:

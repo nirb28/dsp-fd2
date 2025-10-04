@@ -89,7 +89,7 @@ class UnifiedFrontDoorConfig(BaseModel):
     environment: str = Field(default="production")
     request_timeout: float = Field(default=30.0)
     redis_url: Optional[str] = Field(None, description="Redis URL for caching")
-    auto_configure_apisix: bool = Field(default=True, description="Auto-configure APISIX on startup")
+    auto_configure_apisix: bool = Field(default=False, description="Auto-configure APISIX on startup")
     cache_ttl: int = Field(default=300, description="Cache TTL in seconds")
 
 
@@ -607,7 +607,7 @@ config = UnifiedFrontDoorConfig(
     module_pool_size=int(os.getenv("MODULE_POOL_SIZE", "10")),
     environment=os.getenv("ENVIRONMENT", "production"),
     redis_url=os.getenv("REDIS_URL"),
-    auto_configure_apisix=os.getenv("AUTO_CONFIGURE_APISIX", "true").lower() == "true",
+    auto_configure_apisix=os.getenv("AUTO_CONFIGURE_APISIX", "false").lower() == "true",
     cache_ttl=int(os.getenv("CACHE_TTL", "300"))
 )
 
