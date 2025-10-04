@@ -163,43 +163,36 @@ async def verify_apisix_routes():
 
 
 async def get_jwt_token() -> str:
-    """Get JWT token from JWT service"""
-    print("\n3. Getting JWT token...")
+    """Get JWT token via Front Door using manifest configuration"""
+    print("\n3. Getting JWT token via Front Door...")
     
-    # Import JWT client
-    sys.path.insert(0, str(Path(__file__).parent / "src"))
-    from jwt_client import JWTClient
-    
-    # Use JWT service (default port 5000)
-    jwt_service_url = "http://localhost:5000"
-    jwt_client = JWTClient(jwt_service_url)
-    
-    try:
-        # Use the same secret that APISIX consumer is configured with
-        # This should match the JWT_SECRET_KEY in the JWT service .env file
-        jwt_secret = "dev-secret-key"  # Default from JWT service
-        
-        result = await jwt_client.generate_token(
-            username="admin",
-            password="password",
-            api_key="api_key_sas2py",  # Use sas2py API key for APISIX integration
-            custom_secret=jwt_secret  # Sign with the same secret APISIX expects
-        )
-        
-        await jwt_client.close()
-        
-        if result.get("success"):
-            token = result.get("access_token")
-            print(f"✓ Token obtained from JWT service")
-            return token
-        else:
-            print(f"✗ Failed to get token: {result.get('error')}")
-            return None
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            # Use Front Door endpoint: /{project_id}/{jwt_module_name}/token
+            response = await client.post(
+                f"{FRONT_DOOR_URL}/sas2py/simple-auth/token",
+                json={
+                    "username": "admin",
+                    "password": "password"
+                }
+            )
             
-    except Exception as e:
-        print(f"✗ Token error: {str(e)}")
-        await jwt_client.close()
-        return None
+            if response.status_code == 200:
+                data = response.json()
+                token = data.get("access_token")
+                print(f"✓ Token obtained via Front Door")
+                print(f"  Token preview: {token[:50] if token else 'None'}...")
+                return token
+            else:
+                print(f"✗ Failed to get token: {response.status_code}")
+                print(f"  Response: {response.text}")
+                return None
+                
+        except Exception as e:
+            print(f"✗ Token error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
 
 
 async def test_convert_endpoint(token: str):

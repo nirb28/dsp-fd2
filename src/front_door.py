@@ -733,6 +733,119 @@ async def cleanup_project_apisix_resources(project_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to cleanup resources: {str(e)}")
 
 
+# JWT Token endpoint
+@app.post("/{project_id}/{jwt_module_name}/token")
+async def get_jwt_token(
+    project_id: str,
+    jwt_module_name: str,
+    request: Request
+):
+    """
+    Get JWT token using configuration from Control Tower manifest
+    
+    URL Pattern: /{project_id}/{jwt_module_name}/token
+    Example: /sas2py/simple-auth/token
+    
+    Request Body:
+    {
+        "username": "user",
+        "password": "password"
+    }
+    """
+    try:
+        # Get manifest from Control Tower with environment resolution
+        # Note: We need to fetch directly here to ensure we get resolved env vars
+        headers = {}
+        if app.state.front_door.config.control_tower_secret:
+            headers["X-DSPAI-Client-Secret"] = app.state.front_door.config.control_tower_secret
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{app.state.front_door.config.control_tower_url}/manifests/{project_id}?resolve_env=true",
+                headers=headers
+            )
+            
+            if response.status_code != 200:
+                raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+            
+            manifest = response.json()
+        
+        # Find the JWT module by name
+        jwt_module = None
+        modules = manifest.get("modules", [])
+        
+        # Debug: log all modules with their configs
+        logger.info(f"Looking for JWT module '{jwt_module_name}' in {len(modules)} modules")
+        for idx, module in enumerate(modules):
+            mod_name = module.get('name')
+            mod_type = module.get('module_type')
+            logger.info(f"  Module {idx}: name={mod_name}, type={mod_type}")
+            
+            # Log config keys for debugging
+            if mod_name == jwt_module_name:
+                config_keys = list(module.get('config', {}).keys())
+                logger.info(f"    Config keys: {config_keys}")
+            
+            if mod_name == jwt_module_name and mod_type == "jwt_config":
+                jwt_module = module
+                logger.info(f"  [OK] Found matching JWT module at index {idx}")
+                break
+        
+        if not jwt_module:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"JWT module '{jwt_module_name}' not found in project {project_id}"
+            )
+        
+        # Get JWT service URL from module config
+        jwt_config = jwt_module.get("config", {})
+        jwt_service_url = jwt_config.get("service_url")
+        
+        # Debug logging
+        logger.info(f"JWT module config: {jwt_config}")
+        logger.info(f"JWT service URL: {jwt_service_url}")
+        
+        if not jwt_service_url:
+            raise HTTPException(
+                status_code=500,
+                detail=f"JWT service URL not configured in module {jwt_module_name}. Config: {jwt_config}"
+            )
+        
+        # Get request body (username/password)
+        body = await request.json()
+        
+        # Prepare api_key_config (exclude service_url as it's not needed by JWT service)
+        api_key_config = {k: v for k, v in jwt_config.items() if k != "service_url"}
+        
+        # Prepare request to JWT service with inline api_key_config
+        jwt_request = {
+            "username": body.get("username"),
+            "password": body.get("password"),
+            "api_key_config": api_key_config
+        }
+        
+        # Forward to JWT service
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{jwt_service_url}/token",
+                json=jwt_request
+            )
+            
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=response.json() if response.headers.get("content-type") == "application/json" else response.text
+                )
+            
+            return response.json()
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting JWT token: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get JWT token: {str(e)}")
+
+
 # Catch-all route for request handling
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"])
 async def route_request(request: Request):
