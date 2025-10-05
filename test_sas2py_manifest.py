@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 import httpx
 from typing import Dict, Any
-from apisix_client import APISIXClient
+from apisix import APISIXClient
 
 # Configuration
 FRONT_DOOR_URL = "http://localhost:8080"

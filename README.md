@@ -261,6 +261,29 @@ docker build -t dsp-fd2:latest .
 docker run -p 8080:8080 --env-file .env dsp-fd2:latest
 ```
 
+## 📚 Documentation
+
+Comprehensive documentation is available in the [`docs/`](docs/) directory:
+
+- **[Documentation Index](docs/README.md)** - Complete documentation overview
+- **[Langfuse Quick Start](docs/LANGFUSE_QUICK_START.md)** - Get started with LLM observability
+- **[APISIX Integration](docs/README_APISIX.md)** - API Gateway integration guide
+- **[Security Design](docs/SECURITY_DESIGN.md)** - Security architecture and best practices
+- **[Scalability & Resilience](docs/SCALABILITY_RESILIENCE.md)** - High availability strategies
+
+See the [docs directory](docs/) for the complete documentation set.
+
+## 🎯 Recent Updates
+
+### APISIX Client Refactoring (Latest)
+- ✅ Refactored monolithic client into modular architecture
+- ✅ Added **Langfuse integration** for LLM observability
+- ✅ Implemented composition pattern for better maintainability
+- ✅ Created comprehensive plugin builders
+- ✅ Full documentation suite
+
+See [Refactoring Summary](docs/REFACTORING_SUMMARY.md) for details.
+
 ## Roadmap
 
 - [x] Phase 1: Basic routing and module interface
@@ -268,9 +291,18 @@ docker run -p 8080:8080 --env-file .env dsp-fd2:latest
 - [x] Phase 3: Security implementation
 - [x] Phase 4: Dynamic module loading
 - [x] Phase 5: OpenAI-compatible inference module
-- [ ] Phase 6: Production monitoring
-- [ ] Phase 7: Auto-scaling and optimization
-- [ ] Phase 8: Additional module types (RAG, Data Processing, etc.)
+- [x] Phase 6: APISIX Gateway integration
+- [x] Phase 7: Langfuse observability integration
+- [ ] Phase 8: Production monitoring enhancements
+- [ ] Phase 9: Auto-scaling and optimization
+- [ ] Phase 10: Additional module types (RAG, Data Processing, etc.)
 
+## 🤝 Contributing
+
+1. Review the [documentation](docs/README.md)
+2. Check existing issues and PRs
+3. Follow the module development guide
+4. Add tests for new features
+5. Update documentation
 
 Built with ❤️ by the DSP Platform Team

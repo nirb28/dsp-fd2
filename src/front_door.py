@@ -47,7 +47,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 # Import APISIX client
-from apisix_client import APISIXClient
+from apisix import APISIXClient
 
 # Optional imports
 try:
