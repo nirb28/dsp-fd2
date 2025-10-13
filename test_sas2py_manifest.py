@@ -164,7 +164,7 @@ async def verify_apisix_routes():
 
 async def get_jwt_token() -> str:
     """Get JWT token via Front Door using manifest configuration"""
-    print("\n3. Getting JWT token via Front Door...")
+    print("\n3. Getting JWT token (plain) via Front Door...")
     
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
@@ -180,7 +180,9 @@ async def get_jwt_token() -> str:
             if response.status_code == 200:
                 data = response.json()
                 token = data.get("access_token")
+                token_type = data.get("token_type", "JWT")
                 print(f"✓ Token obtained via Front Door")
+                print(f"  Token type: {token_type}")
                 print(f"  Token preview: {token[:50] if token else 'None'}...")
                 return token
             else:
@@ -190,6 +192,56 @@ async def get_jwt_token() -> str:
                 
         except Exception as e:
             print(f"✗ Token error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+
+async def get_jwe_token() -> str:
+    """Get JWE-encrypted token via Front Door using jwe-auth module"""
+    print("\n3b. Getting JWE token via Front Door...")
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            # Use jwe-auth module which has JWE encryption enabled
+            response = await client.post(
+                f"{FRONT_DOOR_URL}/sas2py/jwe-auth/token",
+                json={
+                    "username": "admin",
+                    "password": "password"
+                }
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                token = data.get("access_token")
+                token_type = data.get("token_type", "JWT")
+                encryption = data.get("encryption", "N/A")
+                note = data.get("note", "")
+                
+                print(f"✓ JWE token obtained via Front Door")
+                print(f"  Token type: {token_type}")
+                print(f"  Encryption: {encryption}")
+                print(f"  Note: {note}")
+                print(f"  Token preview: {token[:80] if token else 'None'}...")
+                
+                # Verify it's actually JWE (should have 5 parts separated by dots)
+                if token:
+                    parts = token.split('.')
+                    print(f"  Token parts: {len(parts)} (JWE should have 5 parts)")
+                    if len(parts) == 5:
+                        print(f"  ✓ Confirmed JWE format (5 parts)")
+                    elif len(parts) == 3:
+                        print(f"  ⚠ WARNING: This is a plain JWT (3 parts), not JWE!")
+                
+                return token
+            else:
+                print(f"✗ Failed to get JWE token: {response.status_code}")
+                print(f"  Response: {response.text}")
+                return None
+                
+        except Exception as e:
+            print(f"✗ JWE token error: {str(e)}")
             import traceback
             traceback.print_exc()
             return None
@@ -405,16 +457,23 @@ async def main():
     # Verify routes
     results.append(await verify_apisix_routes())
     
-    # Get token
+    # Get plain JWT token
     token = await get_jwt_token()
     if token:
         results.append(True)
         
-        # Test endpoints
+        # Test endpoints with plain JWT
         results.append(await test_convert_endpoint(token))
         results.append(await test_test_endpoint(token))
     else:
         results.extend([False, False, False])
+    
+    # Get JWE token
+    jwe_token = await get_jwe_token()
+    if jwe_token:
+        results.append(True)
+    else:
+        results.append(False)
     
     # Summary
     print("\n" + "=" * 60)

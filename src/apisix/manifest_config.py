@@ -58,35 +58,54 @@ class ManifestConfigurator:
             results["errors"].append("No APISIX gateway module found in manifest")
             return results
         
-        # Check if consumer/service are defined in any APISIX module
-        consumer_config = None
-        service_config = None
+        # Collect all unique consumers and services from APISIX modules
+        consumer_configs = []
+        service_configs = []
+        seen_consumer_usernames = set()
+        seen_service_ids = set()
+        
         for apisix_module in apisix_modules:
             config = apisix_module.get("config", {})
-            if config.get("consumer") and not consumer_config:
-                consumer_config = config.get("consumer")
-            if config.get("service") and not service_config:
-                service_config = config.get("service")
+            
+            # Collect unique consumers
+            if config.get("consumer"):
+                consumer = config.get("consumer")
+                username = consumer.get("username", "consumer")
+                if username not in seen_consumer_usernames:
+                    consumer_configs.append(consumer)
+                    seen_consumer_usernames.add(username)
+            
+            # Collect unique services
+            if config.get("service"):
+                service = config.get("service")
+                service_id = service.get("id", "service")
+                if service_id not in seen_service_ids:
+                    service_configs.append(service)
+                    seen_service_ids.add(service_id)
         
-        # Create consumer if defined in manifest
-        if consumer_config:
+        # Create all consumers
+        for consumer_config in consumer_configs:
             try:
                 # Add project_id prefix to username if not already present
                 username = consumer_config.get("username", "consumer")
                 if not username.startswith(f"{project_id}_"):
                     consumer_config["username"] = f"{project_id}_{username}"
                 
+                # APISIX consumer usernames must match pattern ^[a-zA-Z0-9_]+$
+                # Replace hyphens with underscores to comply
+                consumer_config["username"] = consumer_config["username"].replace("-", "_")
+                
                 consumer = APISIXConsumer(**consumer_config)
                 result = await self.consumer_manager.create_consumer(consumer)
                 results["consumers"].append(result)
                 logger.info(f"Created consumer from manifest: {consumer.username}")
             except Exception as e:
-                error_msg = f"Failed to create consumer: {str(e)}"
+                error_msg = f"Failed to create consumer {consumer_config.get('username')}: {str(e)}"
                 logger.error(error_msg)
                 results["errors"].append(error_msg)
         
-        # Create service if defined in manifest
-        if service_config:
+        # Create all services
+        for service_config in service_configs:
             try:
                 # Add project_id prefix to service id and name if not already present
                 service_id = service_config.get("id", "service")
@@ -102,7 +121,7 @@ class ManifestConfigurator:
                 results["services"].append(result)
                 logger.info(f"Created service from manifest: {service.name}")
             except Exception as e:
-                error_msg = f"Failed to create service: {str(e)}"
+                error_msg = f"Failed to create service {service_config.get('id')}: {str(e)}"
                 logger.error(error_msg)
                 results["errors"].append(error_msg)
         

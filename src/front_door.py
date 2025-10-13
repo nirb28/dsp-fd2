@@ -817,6 +817,14 @@ async def get_jwt_token(
         # Prepare api_key_config (exclude service_url as it's not needed by JWT service)
         api_key_config = {k: v for k, v in jwt_config.items() if k != "service_url"}
         
+        # Debug: Log the api_key_config being sent
+        logger.info(f"Sending api_key_config to JWT service:")
+        logger.info(f"  Keys: {list(api_key_config.keys())}")
+        if 'jwe_config' in api_key_config:
+            logger.info(f"  JWE config present: {api_key_config['jwe_config']}")
+        else:
+            logger.info(f"  No JWE config found in api_key_config")
+        
         # Prepare request to JWT service with inline api_key_config
         jwt_request = {
             "username": body.get("username"),
