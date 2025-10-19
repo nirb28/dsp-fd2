@@ -382,6 +382,85 @@ def multiply_numbers(a: int, b: int) -> int:
             return False
 
 
+async def test_openai_compatible_endpoint(token: str):
+    """Test the OpenAI-compatible /sas2py/v1/chat/completions endpoint"""
+    print("\n5b. Testing OpenAI-compatible endpoint...")
+    
+    async with httpx.AsyncClient(
+        timeout=60.0, 
+        follow_redirects=True,
+        default_encoding="utf-8"
+    ) as client:
+        try:
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "Accept-Encoding": "identity"
+            }
+            
+            # Standard OpenAI chat completion request with custom prompt
+            payload = {
+                "model": "llama-3.3-70b-versatile",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a helpful AI assistant that provides concise answers."
+                    },
+                    {
+                        "role": "user",
+                        "content": "What is the capital of France? Answer in one word."
+                    }
+                ],
+                "temperature": 0.7,
+                "max_tokens": 100
+            }
+            
+            response = await client.post(
+                f"{FRONT_DOOR_URL}/sas2py/v1/chat/completions",
+                headers=headers,
+                json=payload
+            )
+            
+            print(f"  Status: {response.status_code}")
+            print(f"  Response headers: {dict(response.headers)}")
+            
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    print(f"✓ OpenAI-compatible endpoint successful")
+                    
+                    # Validate OpenAI response structure
+                    if "choices" in data and len(data["choices"]) > 0:
+                        message = data["choices"][0].get("message", {})
+                        content = message.get("content", "")
+                        print(f"  Model: {data.get('model', 'N/A')}")
+                        print(f"  Response: {content[:100]}...")
+                        print(f"  ✓ Valid OpenAI response structure")
+                        return True
+                    else:
+                        print(f"  ⚠ Response missing expected OpenAI structure")
+                        print(f"  Response preview: {str(data)[:200]}...")
+                        return False
+                        
+                except Exception as json_err:
+                    print(f"✗ JSON decode error: {json_err}")
+                    print(f"  Raw response (first 500 bytes): {response.content[:500]}")
+                    return False
+            else:
+                print(f"✗ OpenAI endpoint failed: {response.status_code}")
+                try:
+                    print(f"  Response: {response.text[:500]}")
+                except:
+                    print(f"  Raw response: {response.content[:500]}")
+                return False
+                
+        except Exception as e:
+            print(f"✗ OpenAI endpoint error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+
 async def verify_manifest_config():
     """Verify manifest configuration in Control Tower"""
     print("\n6. Verifying manifest configuration...")
@@ -465,8 +544,9 @@ async def main():
         # Test endpoints with plain JWT
         results.append(await test_convert_endpoint(token))
         results.append(await test_test_endpoint(token))
+        results.append(await test_openai_compatible_endpoint(token))
     else:
-        results.extend([False, False, False])
+        results.extend([False, False, False, False])
     
     # Get JWE token
     jwe_token = await get_jwe_token()
