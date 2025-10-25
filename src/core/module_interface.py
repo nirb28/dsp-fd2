@@ -18,6 +18,7 @@ class ModuleType(str, Enum):
     DATA_PROCESSING = "data_processing"
     EVALUATION = "evaluation"
     TRAINING = "training"
+    LANGGRAPH_WORKFLOW = "langgraph_workflow"
 
 
 class ModuleStatus(str, Enum):
