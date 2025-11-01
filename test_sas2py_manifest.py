@@ -532,7 +532,9 @@ async def main():
     
     # Sync APISIX via Front Door
     results.append(await sync_apisix_from_manifest())
-    
+
+    print("******* Exiting midway!"); sys.exit()
+
     # Verify routes
     results.append(await verify_apisix_routes())
     
