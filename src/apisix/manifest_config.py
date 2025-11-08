@@ -43,16 +43,22 @@ class ManifestConfigurator:
         project_name = manifest.get("project_name", "Unknown Project")
         environment = manifest.get("environment", "default")
         
-        # Find APISIX gateway modules in manifest
+        # Find APISIX gateway modules and service modules in manifest
         modules = manifest.get("modules", [])
         apisix_modules = []
         jwt_module = None
+        rag_service_modules = []
+        model_server_modules = []
         
         for module in modules:
             if module.get("module_type") == "api_gateway" and "apisix" in module.get("name", "").lower():
                 apisix_modules.append(module)
             elif module.get("module_type") == "jwt_config":
                 jwt_module = module
+            elif module.get("module_type") == "rag_service":
+                rag_service_modules.append(module)
+            elif module.get("module_type") == "model_server":
+                model_server_modules.append(module)
         
         if not apisix_modules:
             results["errors"].append("No APISIX gateway module found in manifest")
@@ -229,6 +235,150 @@ class ManifestConfigurator:
                     error_msg = f"Failed to create route {route_config.get('name')}: {str(e)}"
                     logger.error(error_msg)
                     results["errors"].append(error_msg)
+        
+        # Auto-generate routes for RAG service modules
+        for rag_module in rag_service_modules:
+            try:
+                rag_config = rag_module.get("config", {})
+                module_name = rag_module.get("name", "rag-service")
+                service_url = rag_config.get("service_url", "")
+                
+                # Extract host and port from service_url
+                from urllib.parse import urlparse
+                parsed_url = urlparse(service_url)
+                host = parsed_url.hostname or "localhost"
+                port = parsed_url.port or 8080
+                
+                # Create upstream for RAG service
+                upstream_id = f"{project_id}-{module_name}-upstream"
+                upstream = APISIXUpstream(
+                    id=upstream_id,
+                    name=upstream_id,
+                    type="roundrobin",
+                    nodes={f"{host}:{port}": 1},
+                    timeout={"connect": 30, "send": rag_config.get("request_timeout", 60), "read": rag_config.get("request_timeout", 60)},
+                    retries=rag_config.get("max_retries", 2),
+                    pass_host="pass",
+                    scheme=parsed_url.scheme or "http"
+                )
+                result = await self.upstream_manager.create_upstream(upstream)
+                results["upstreams"].append(result)
+                logger.info(f"Created RAG service upstream: {upstream_id}")
+                
+                # Create routes for query and retrieve endpoints
+                endpoints = [
+                    {"path": rag_config.get("query_endpoint", "/query"), "name": "query"},
+                    {"path": rag_config.get("retrieve_endpoint", "/retrieve"), "name": "retrieve"}
+                ]
+                
+                for endpoint in endpoints:
+                    route_id = f"{project_id}-{module_name}-{endpoint['name']}"
+                    route_uri = f"/{project_id}/rag/{module_name}{endpoint['path']}"
+                    
+                    # Build plugins for the route
+                    route_plugins = {}
+                    
+                    # Add JWT auth if enabled
+                    if rag_config.get("jwt_auth_enabled", False):
+                        route_plugins["jwt-auth"] = {}
+                    
+                    # Add proxy-rewrite to forward to actual RAG service path
+                    route_plugins["proxy-rewrite"] = {
+                        "regex_uri": [f"^/{project_id}/rag/{module_name}(.*)", "$1"]
+                    }
+                    
+                    route = APISIXRoute(
+                        id=route_id,
+                        name=route_id,
+                        uri=route_uri,
+                        methods=["GET", "POST"],
+                        upstream_id=upstream_id,
+                        plugins=route_plugins,
+                        desc=f"Auto-generated route for RAG service {module_name} - {endpoint['name']} endpoint"
+                    )
+                    result = await self.route_manager.create_route(route)
+                    results["routes"].append(result)
+                    logger.info(f"Created RAG service route: {route_id}")
+                    
+            except Exception as e:
+                error_msg = f"Failed to auto-generate routes for RAG service {rag_module.get('name')}: {str(e)}"
+                logger.error(error_msg)
+                results["errors"].append(error_msg)
+        
+        # Auto-generate routes for model server modules
+        for model_module in model_server_modules:
+            try:
+                model_config = model_module.get("config", {})
+                module_name = model_module.get("name", "model-server")
+                service_url = model_config.get("service_url", "")
+                
+                # Extract host and port from service_url
+                from urllib.parse import urlparse
+                parsed_url = urlparse(service_url)
+                host = parsed_url.hostname or "localhost"
+                port = parsed_url.port or 8000
+                
+                # Create upstream for model server
+                upstream_id = f"{project_id}-{module_name}-upstream"
+                upstream = APISIXUpstream(
+                    id=upstream_id,
+                    name=upstream_id,
+                    type="roundrobin",
+                    nodes={f"{host}:{port}": 1},
+                    timeout={"connect": 30, "send": model_config.get("request_timeout", 30), "read": model_config.get("request_timeout", 30)},
+                    retries=model_config.get("max_retries", 2),
+                    pass_host="pass",
+                    scheme=parsed_url.scheme or "http"
+                )
+                result = await self.upstream_manager.create_upstream(upstream)
+                results["upstreams"].append(result)
+                logger.info(f"Created model server upstream: {upstream_id}")
+                
+                # Create routes for embeddings, rerank, classify, and health endpoints
+                endpoints = [
+                    {"path": model_config.get("embeddings_endpoint", "/embeddings"), "name": "embeddings"},
+                    {"path": model_config.get("rerank_endpoint", "/rerank"), "name": "rerank"},
+                    {"path": model_config.get("classify_endpoint", "/classify"), "name": "classify"},
+                    {"path": model_config.get("health_endpoint", "/health"), "name": "health"}
+                ]
+                
+                for endpoint in endpoints:
+                    route_id = f"{project_id}-{module_name}-{endpoint['name']}"
+                    route_uri = f"/{project_id}/models/{module_name}{endpoint['path']}"
+                    
+                    # Build plugins for the route
+                    route_plugins = {}
+                    
+                    # Add JWT auth if enabled
+                    if model_config.get("jwt_auth_enabled", False):
+                        route_plugins["jwt-auth"] = {}
+                    
+                    # Add API key auth if enabled
+                    if model_config.get("api_key_enabled", False) and model_config.get("api_key"):
+                        route_plugins["key-auth"] = {}
+                    
+                    # Add proxy-rewrite to forward to actual model server path
+                    route_plugins["proxy-rewrite"] = {
+                        "regex_uri": [f"^/{project_id}/models/{module_name}(.*)", "$1"]
+                    }
+                    
+                    route = APISIXRoute(
+                        id=route_id,
+                        name=route_id,
+                        uri=route_uri,
+                        methods=["GET", "POST"],
+                        upstream_id=upstream_id,
+                        plugins=route_plugins,
+                        desc=f"Auto-generated route for model server {module_name} - {endpoint['name']} endpoint"
+                    )
+                    result = await self.route_manager.create_route(route)
+                    results["routes"].append(result)
+                    logger.info(f"Created model server route: {route_id}")
+                    
+            except Exception as e:
+                error_msg = f"Failed to auto-generate routes for model server {model_module.get('name')}: {str(e)}"
+                logger.error(error_msg)
+                results["errors"].append(error_msg)
             
         # Set global plugins for this project (if needed)
         global_plugins = {}
