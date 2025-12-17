@@ -63,6 +63,17 @@ except ImportError:
     logger.warning("Base module not found - direct module routing may be limited")
     BaseModule = None
 
+# Import observability services
+try:
+    from observability import HealthCheckService, MetricsService, HealthStatus
+    OBSERVABILITY_AVAILABLE = True
+except ImportError:
+    logger.warning("Observability module not found - health/metrics features limited")
+    HealthCheckService = None
+    MetricsService = None
+    HealthStatus = None
+    OBSERVABILITY_AVAILABLE = False
+
 
 class RoutingMode(Enum):
     """Routing mode for a project"""
@@ -218,6 +229,12 @@ class UnifiedFrontDoorService:
         self.project_routing: Dict[str, RoutingMode] = {}
         self.configured_apisix_projects: Dict[str, Any] = {}
         
+        # Observability services (per-project)
+        self.health_services: Dict[str, Any] = {}  # project_id -> HealthCheckService
+        self.metrics_services: Dict[str, Any] = {}  # project_id -> MetricsService
+        self.global_health_service: Optional[Any] = None
+        self.global_metrics_service: Optional[Any] = None
+        
         # Initialize APISIX client if configured
         if config.apisix_admin_url and config.apisix_admin_key:
             self.apisix_client = APISIXClient(
@@ -239,6 +256,14 @@ class UnifiedFrontDoorService:
                 logger.warning(f"Failed to connect to Redis: {e}")
                 self.redis_client = None
         
+        # Initialize global observability services
+        if OBSERVABILITY_AVAILABLE:
+            self.global_health_service = HealthCheckService()
+            await self.global_health_service.initialize()
+            self.global_metrics_service = MetricsService()
+            await self.global_metrics_service.initialize()
+            logger.info("Global observability services initialized")
+        
         # Auto-configure APISIX routes if enabled
         if self.config.auto_configure_apisix and self.apisix_client:
             logger.info("Auto-configuring APISIX routes from Control Tower manifests")
@@ -254,6 +279,82 @@ class UnifiedFrontDoorService:
             await self.module_manager.shutdown_all()
         if self.apisix_client:
             await self.apisix_client.close()
+        
+        # Shutdown observability services
+        if self.global_health_service:
+            await self.global_health_service.shutdown()
+        if self.global_metrics_service:
+            await self.global_metrics_service.shutdown()
+        for health_svc in self.health_services.values():
+            await health_svc.shutdown()
+        for metrics_svc in self.metrics_services.values():
+            await metrics_svc.shutdown()
+    
+    async def configure_observability_from_manifest(self, project_id: str, manifest: Dict[str, Any]):
+        """Configure health check and metrics services from manifest modules"""
+        if not OBSERVABILITY_AVAILABLE:
+            return
+        
+        modules = manifest.get("modules", [])
+        
+        for module in modules:
+            module_type = module.get("module_type", "").lower()
+            module_config = module.get("config", {})
+            
+            if module_type == "health_check":
+                # Create health check service from manifest config
+                health_service = HealthCheckService.from_manifest_config(module_config)
+                await health_service.initialize()
+                self.health_services[project_id] = health_service
+                logger.info(f"Configured health check service for project {project_id}")
+            
+            elif module_type == "metrics":
+                # Create metrics service from manifest config
+                metrics_service = MetricsService.from_manifest_config(module_config)
+                await metrics_service.initialize()
+                self.metrics_services[project_id] = metrics_service
+                logger.info(f"Configured metrics service for project {project_id}")
+    
+    async def get_project_health(self, project_id: str) -> Dict[str, Any]:
+        """Get health status for a specific project"""
+        if project_id in self.health_services:
+            return await self.health_services[project_id].check_all()
+        elif self.global_health_service:
+            return await self.global_health_service.check_all()
+        else:
+            return {
+                "status": "unknown",
+                "message": "No health check service configured",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+    
+    async def get_project_liveness(self, project_id: str) -> Dict[str, Any]:
+        """Get liveness status for a specific project"""
+        if project_id in self.health_services:
+            return await self.health_services[project_id].liveness_check()
+        elif self.global_health_service:
+            return await self.global_health_service.liveness_check()
+        else:
+            return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    
+    async def get_project_readiness(self, project_id: str) -> Dict[str, Any]:
+        """Get readiness status for a specific project"""
+        if project_id in self.health_services:
+            return await self.health_services[project_id].readiness_check()
+        elif self.global_health_service:
+            return await self.global_health_service.readiness_check()
+        else:
+            return {"status": "unknown", "timestamp": datetime.utcnow().isoformat()}
+    
+    def get_project_metrics(self, project_id: str) -> Tuple[bytes, str]:
+        """Get Prometheus metrics for a specific project"""
+        if project_id in self.metrics_services:
+            svc = self.metrics_services[project_id]
+            return svc.get_metrics_output(), svc.get_content_type()
+        elif self.global_metrics_service:
+            return self.global_metrics_service.get_metrics_output(), self.global_metrics_service.get_content_type()
+        else:
+            return b"# No metrics service configured\n", "text/plain"
     
     async def sync_manifests(self):
         """Synchronize manifests and determine routing modes"""
@@ -345,6 +446,9 @@ class UnifiedFrontDoorService:
                         self.config.cache_ttl,
                         json.dumps(manifest)
                     )
+            
+            # Configure observability services from manifest (for all routing modes)
+            await self.configure_observability_from_manifest(project_id, manifest)
         
         except Exception as e:
             logger.error(f"Failed to configure project {project_id}: {str(e)}")
@@ -626,6 +730,63 @@ async def health_check():
 async def service_status():
     """Detailed service status"""
     return await app.state.front_door.get_status()
+
+
+@app.get("/metrics")
+async def global_metrics():
+    """Global Prometheus metrics endpoint"""
+    metrics_output, content_type = app.state.front_door.get_project_metrics("_global")
+    return Response(content=metrics_output, media_type=content_type)
+
+
+@app.get("/health/live")
+async def global_liveness():
+    """Global liveness probe"""
+    if app.state.front_door.global_health_service:
+        return await app.state.front_door.global_health_service.liveness_check()
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+
+@app.get("/health/ready")
+async def global_readiness():
+    """Global readiness probe"""
+    if app.state.front_door.global_health_service:
+        return await app.state.front_door.global_health_service.readiness_check()
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+
+# Project-specific health and metrics endpoints
+@app.get("/{project_id}/health")
+async def project_health(project_id: str):
+    """Health check endpoint for a specific project"""
+    if project_id not in app.state.front_door.project_routing:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    return await app.state.front_door.get_project_health(project_id)
+
+
+@app.get("/{project_id}/health/live")
+async def project_liveness(project_id: str):
+    """Liveness probe for a specific project"""
+    if project_id not in app.state.front_door.project_routing:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    return await app.state.front_door.get_project_liveness(project_id)
+
+
+@app.get("/{project_id}/health/ready")
+async def project_readiness(project_id: str):
+    """Readiness probe for a specific project"""
+    if project_id not in app.state.front_door.project_routing:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    return await app.state.front_door.get_project_readiness(project_id)
+
+
+@app.get("/{project_id}/metrics")
+async def project_metrics(project_id: str):
+    """Prometheus metrics endpoint for a specific project"""
+    if project_id not in app.state.front_door.project_routing:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+    metrics_output, content_type = app.state.front_door.get_project_metrics(project_id)
+    return Response(content=metrics_output, media_type=content_type)
 
 
 # Admin endpoints
