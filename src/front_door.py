@@ -718,6 +718,101 @@ config = UnifiedFrontDoorConfig(
 app.state.front_door = UnifiedFrontDoorService(config)
 
 
+# Metrics instrumentation middleware
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    """Record HTTP request metrics for Prometheus."""
+    if not OBSERVABILITY_AVAILABLE:
+        return await call_next(request)
+
+    path = request.url.path
+    # Skip metrics/health endpoints to avoid noise/recursion
+    if path.startswith("/health") or path.startswith("/metrics") or path.endswith("/health") or path.endswith("/metrics"):
+        return await call_next(request)
+
+    start = time.perf_counter()
+    status_code = 500
+    request_size = 0
+    response_size = 0
+
+    # Try to get request body size
+    try:
+        body = await request.body()
+        request_size = len(body) if body else 0
+    except Exception:
+        request_size = 0
+
+    # Get normalized endpoint path
+    endpoint = path
+    try:
+        route = request.scope.get("route")
+        if route is not None and hasattr(route, "path"):
+            endpoint = route.path
+    except Exception:
+        endpoint = path
+
+    # Determine which metrics service to use (project-specific or global)
+    project_id = None
+    metrics_service = None
+    try:
+        project_id = app.state.front_door.extract_project_id(request)
+        if project_id and project_id in app.state.front_door.metrics_services:
+            metrics_service = app.state.front_door.metrics_services[project_id]
+        else:
+            metrics_service = app.state.front_door.global_metrics_service
+    except Exception:
+        metrics_service = app.state.front_door.global_metrics_service
+
+    # Increment active requests gauge
+    if metrics_service:
+        try:
+            metrics_service.inc_gauge("active_requests", method=request.method, endpoint=endpoint)
+        except Exception:
+            pass
+
+    try:
+        response = await call_next(request)
+        status_code = getattr(response, "status_code", 200)
+
+        # Try to get response size
+        try:
+            if hasattr(response, "body") and response.body is not None:
+                response_size = len(response.body)
+        except Exception:
+            response_size = 0
+
+        return response
+    except Exception:
+        # Record error
+        if metrics_service:
+            try:
+                metrics_service.record_error(error_type="exception", endpoint=endpoint)
+            except Exception:
+                pass
+        raise
+    finally:
+        elapsed = time.perf_counter() - start
+        if metrics_service:
+            # Record request metrics
+            try:
+                metrics_service.record_request(
+                    method=request.method,
+                    endpoint=endpoint,
+                    status_code=status_code,
+                    latency_seconds=elapsed,
+                    request_size=request_size,
+                    response_size=response_size,
+                )
+            except Exception:
+                pass
+
+            # Decrement active requests gauge
+            try:
+                metrics_service.dec_gauge("active_requests", method=request.method, endpoint=endpoint)
+            except Exception:
+                pass
+
+
 # Health and status endpoints
 @app.get("/health")
 async def health_check():
