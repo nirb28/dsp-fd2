@@ -717,6 +717,14 @@ config = UnifiedFrontDoorConfig(
 
 app.state.front_door = UnifiedFrontDoorService(config)
 
+# Include mock service routes
+try:
+    from mock_services.mock_routes import router as mock_router
+    app.include_router(mock_router)
+    logger.info("Mock services enabled at /mock/httpbin/* and /mock/openai/*")
+except ImportError as e:
+    logger.warning(f"Mock services not available: {e}")
+
 
 # Metrics instrumentation middleware
 @app.middleware("http")
