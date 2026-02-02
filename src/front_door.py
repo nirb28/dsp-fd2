@@ -74,6 +74,13 @@ except ImportError:
     HealthStatus = None
     OBSERVABILITY_AVAILABLE = False
 
+# Import manifest help service
+try:
+    from core.manifest_help import ManifestHelpService
+except ImportError:
+    logger.warning("Manifest help service not found - manifest help endpoint will be limited")
+    ManifestHelpService = None
+
 
 class RoutingMode(Enum):
     """Routing mode for a project"""
@@ -995,6 +1002,86 @@ async def cleanup_project_apisix_resources(project_id: str):
     except Exception as e:
         logger.error(f"Failed to cleanup project resources: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to cleanup resources: {str(e)}")
+
+
+# Manifest Help endpoint
+@app.get("/{project_id}/help")
+async def get_manifest_help(project_id: str):
+    """
+    Get comprehensive help information about a project's manifest
+    
+    Returns:
+    - All available endpoints and their parameters
+    - Authentication requirements
+    - Security features
+    - Module summary
+    - Usage examples
+    
+    All secrets are automatically redacted for security.
+    """
+    if not ManifestHelpService:
+        raise HTTPException(status_code=503, detail="Manifest help service not available")
+    
+    manifest = None
+    
+    try:
+        # Try to get manifest from Control Tower with environment resolution
+        headers = {}
+        if app.state.front_door.config.control_tower_secret:
+            headers["X-DSPAI-Client-Secret"] = app.state.front_door.config.control_tower_secret
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{app.state.front_door.config.control_tower_url}/manifests/{project_id}?resolve_env=true",
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                try:
+                    manifest = response.json()
+                except Exception as e:
+                    logger.error(f"Failed to parse manifest JSON from Control Tower: {str(e)}")
+                    logger.error(f"Response content: {response.text[:500]}")
+            else:
+                logger.warning(f"Control Tower returned status {response.status_code} for project {project_id}")
+    
+    except Exception as e:
+        logger.warning(f"Failed to fetch manifest from Control Tower: {str(e)}")
+    
+    # Fallback: Try to read manifest from local file system
+    if not manifest:
+        logger.info(f"Attempting to read manifest from local file system for project {project_id}")
+        manifest_path = project_root / ".." / "dsp-ai-control-tower" / "manifests" / f"{project_id}.json"
+        
+        if manifest_path.exists():
+            try:
+                with open(manifest_path, 'r') as f:
+                    manifest = json.load(f)
+                logger.info(f"Successfully loaded manifest from {manifest_path}")
+            except Exception as e:
+                logger.error(f"Failed to read manifest from file: {str(e)}")
+        else:
+            logger.error(f"Manifest file not found at {manifest_path}")
+    
+    if not manifest or not isinstance(manifest, dict):
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Project {project_id} not found. Check Control Tower connection or manifest file."
+        )
+    
+    try:
+        # Generate help information with secrets redacted
+        logger.info(f"Generating help for manifest with keys: {list(manifest.keys())}")
+        help_info = ManifestHelpService.generate_help(manifest)
+        return help_info
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        logger.error(f"Error generating manifest help: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate manifest help: {str(e)}")
 
 
 # JWT Token endpoint
